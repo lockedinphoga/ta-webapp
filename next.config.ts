@@ -39,6 +39,33 @@ const nextConfig: NextConfig = {
   // (see the comments there) so it shares this same "chart.js" instance.
   // "chartjs-adapter-date-fns" isn't used at all — see lib/renderChart.ts.
   serverExternalPackages: ["chartjs-node-canvas", "canvas", "chart.js", "chartjs-plugin-annotation"],
+
+  // WHY THIS EXISTS: when you deploy to Vercel, it doesn't just copy your
+  // whole node_modules folder — it scans your code first to figure out
+  // exactly which files from node_modules are actually used, and only
+  // uploads those (this keeps deployments small and fast to start; this
+  // scanning step is called "file tracing"). Normally that scan works by
+  // looking for `require(...)` / `import` calls with the package name
+  // written out as plain text.
+  //
+  // But lib/renderChart.ts deliberately loads chartjs-chart-financial
+  // using `eval("require")(...)` instead of a normal `require(...)` — see
+  // the big comment there for why (short version: it needs to dodge
+  // Turbopack's bundler, which breaks this specific package). The
+  // side effect is that the file-tracing scan can't see that reference
+  // either, since it's hidden behind eval() on purpose — so on Vercel,
+  // the chartjs-chart-financial files were silently left out of the
+  // deployment, causing "Cannot find module
+  // 'chartjs-chart-financial/dist/chartjs-chart-financial.js'" at
+  // runtime (this worked fine with `npm run dev` locally, because
+  // locally there's no separate "upload only what's traced" step — every
+  // file in node_modules is already sitting right there on disk).
+  //
+  // This setting manually forces those files to be included regardless,
+  // for the one route that needs them.
+  outputFileTracingIncludes: {
+    "/api/analyze": ["./node_modules/chartjs-chart-financial/dist/**"],
+  },
 };
 
 export default nextConfig;

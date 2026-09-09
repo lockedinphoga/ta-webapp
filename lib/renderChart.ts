@@ -137,18 +137,43 @@ async function getChartCanvas(): Promise<ChartJSNodeCanvasType> {
   //
   // Node makes exactly one exception to "type": "module": a file whose
   // extension is literally `.cjs` is ALWAYS loaded as CommonJS, no matter
-  // what the package.json says. So the fix is to make a `.cjs` copy of
-  // the exact same file, once, and require that copy instead. This is
-  // done lazily (only the first time, cached on disk) rather than as a
-  // build step, so it keeps working even if node_modules gets reinstalled.
+  // what the package.json says. An earlier version of this fix exploited
+  // that by writing a one-time `.cjs` copy of the file next to the
+  // original and requiring the copy instead — which worked great locally,
+  // but broke once deployed to Vercel: Vercel's servers run with a
+  // READ-ONLY filesystem (except one special /tmp folder), so writing a
+  // new file inside node_modules at runtime fails there with an
+  // "EROFS: read-only file system" error.
+  //
+  // The fix that works in both places: skip file-extension-based loading
+  // entirely. We read the file's source code as plain text, then hand it
+  // to Node's low-level `Module.prototype._compile()` ourselves — the
+  // same function `require()` normally calls *after* it's already
+  // decided "this is CommonJS". Calling it directly skips that decision
+  // step (the one that reads package.json's "type": "module" and picks
+  // the ES-module loader) entirely, so it doesn't matter what the
+  // package.json says. No disk write needed at all.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const fs = nodeRequire("fs") as typeof import("fs");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const nodePath = nodeRequire("path") as typeof import("path");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const NodeModule = nodeRequire("module") as typeof import("module");
+
   const originalPath = nodeRequire.resolve("chartjs-chart-financial/dist/chartjs-chart-financial.js");
-  const cjsPath = originalPath.replace(/\.js$/, ".force-cjs.cjs");
-  if (!fs.existsSync(cjsPath)) {
-    fs.copyFileSync(originalPath, cjsPath);
-  }
-  nodeRequire(cjsPath);
+  const source = fs.readFileSync(originalPath, "utf8");
+  const financialModule = new NodeModule(originalPath);
+  financialModule.filename = originalPath;
+  // So the file's OWN internal `require('chart.js')` /
+  // `require('chart.js/helpers')` calls still resolve correctly — they
+  // need to search node_modules starting from this file's real folder.
+  financialModule.paths = (NodeModule as unknown as { _nodeModulePaths: (dir: string) => string[] })._nodeModulePaths(
+    nodePath.dirname(originalPath)
+  );
+  (financialModule as unknown as { _compile: (content: string, filename: string) => void })._compile(
+    source,
+    originalPath
+  );
   //
   // NOTE: we deliberately do NOT use chartjs-adapter-date-fns (Chart.js's
   // usual companion package for calendar-aware date axes). Its own main
