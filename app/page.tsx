@@ -12,7 +12,7 @@
 // can handle button clicks and state), unlike our API route which runs on
 // the server.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -104,6 +104,29 @@ interface TradeScenario {
   holdingPeriodLabel: string;
 }
 
+// One saved row from your trade-scenario history (see lib/db.ts /
+// app/api/history/route.ts). This is the permanent record of a past
+// scenario: what was recommended, AND which indicators were checked at
+// the time — "what signal indicated what."
+interface HistoryEntry {
+  id: number;
+  ticker: string;
+  createdAt: string;
+  lastClose: number | null;
+  bias: "long" | "short" | "neutral";
+  confidence: "low" | "medium" | "high";
+  reasoning: string;
+  entryZone: string | null;
+  stopLoss: number;
+  stopLossReasoning: string;
+  target: number;
+  targetReasoning: string;
+  holdingPeriodDays: number;
+  holdingPeriodLabel: string;
+  atr14: number | null;
+  usedIndicators: string[];
+}
+
 interface AnalyzeResponse {
   ticker: string;
   series: SeriesPoint[];
@@ -152,6 +175,35 @@ export default function Home() {
   // stop-loss, target, holding period) on top of the written analysis.
   const [includeTradeScenario, setIncludeTradeScenario] = useState(true);
 
+  // Your saved trade-scenario history (see lib/db.ts) — every past
+  // scenario, remembered across visits/devices, along with which
+  // indicators were in play for each one.
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyTickerFilter, setHistoryTickerFilter] = useState("");
+
+  async function loadHistory(tickerFilter?: string) {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const qs = tickerFilter ? `?ticker=${encodeURIComponent(tickerFilter)}` : "";
+      const res = await fetch(`/api/history${qs}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to load history.");
+      setHistory(data.scenarios);
+    } catch (err: any) {
+      setHistoryError(err.message);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  // Load your full history once when the page first opens.
+  useEffect(() => {
+    loadHistory();
+  }, []);
+
   function toggle(
     setter: React.Dispatch<React.SetStateAction<Record<IndicatorKey, boolean>>>,
     key: IndicatorKey
@@ -176,6 +228,12 @@ export default function Home() {
         throw new Error(data.error ?? "Request failed.");
       }
       setResult(data);
+      // If a trade scenario was generated, it was just saved to your
+      // history in the background — refresh the list so it shows up
+      // right away without needing a manual reload.
+      if (data.tradeScenario) {
+        loadHistory(historyTickerFilter || undefined);
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -248,6 +306,15 @@ export default function Home() {
             {error}
           </div>
         )}
+
+        <HistorySection
+          history={history}
+          loading={historyLoading}
+          error={historyError}
+          tickerFilter={historyTickerFilter}
+          onTickerFilterChange={(v) => setHistoryTickerFilter(v)}
+          onRefresh={() => loadHistory(historyTickerFilter || undefined)}
+        />
 
         {result && (
           <div className="space-y-8">
@@ -564,6 +631,103 @@ function TradeScenarioCard({ scenario, atr14 }: { scenario: TradeScenario; atr14
           </p>
         </div>
       </div>
+    </section>
+  );
+}
+
+// Shows your saved trade-scenario history — every past scenario the app
+// has generated, remembered in a real database (see lib/db.ts) so it's
+// still here next time you open the app, even on a different device.
+// Each entry shows exactly which indicators were checked at the time,
+// answering "what signal indicated what."
+function HistorySection({
+  history,
+  loading,
+  error,
+  tickerFilter,
+  onTickerFilterChange,
+  onRefresh,
+}: {
+  history: HistoryEntry[];
+  loading: boolean;
+  error: string | null;
+  tickerFilter: string;
+  onTickerFilterChange: (value: string) => void;
+  onRefresh: () => void;
+}) {
+  const biasColor = (bias: HistoryEntry["bias"]) =>
+    bias === "long" ? "text-green-700 bg-green-100" : bias === "short" ? "text-red-700 bg-red-100" : "text-slate-700 bg-slate-200";
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+        <h2 className="font-semibold">History</h2>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            onRefresh();
+          }}
+          className="flex gap-2"
+        >
+          <input
+            value={tickerFilter}
+            onChange={(e) => onTickerFilterChange(e.target.value)}
+            placeholder="Filter by ticker (optional)"
+            className="rounded-md border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button type="submit" className="text-sm rounded-md border border-slate-300 px-3 py-1 bg-white hover:bg-slate-50">
+            {loading ? "Loading..." : "Filter"}
+          </button>
+        </form>
+      </div>
+
+      {error && (
+        <div className="rounded-md bg-red-50 border border-red-200 text-red-700 px-4 py-3 text-sm mb-2">
+          {error}
+          {error.includes("DATABASE_URL") && (
+            <p className="mt-1 text-xs">
+              History needs a database connected — see the README for the one-time Vercel Postgres setup.
+            </p>
+          )}
+        </div>
+      )}
+
+      {!error && history.length === 0 && !loading && (
+        <p className="text-sm text-slate-500 bg-white rounded-md border border-slate-200 p-4">
+          No saved scenarios yet — run an analysis with &quot;Include a trade scenario&quot; checked, and it&apos;ll show up here.
+        </p>
+      )}
+
+      {history.length > 0 && (
+        <div className="bg-white rounded-md border border-slate-200 divide-y divide-slate-100">
+          {history.map((h) => (
+            <div key={h.id} className="p-3 text-sm space-y-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold">{h.ticker}</span>
+                <span className={`px-2 py-0.5 rounded font-semibold uppercase text-xs ${biasColor(h.bias)}`}>{h.bias}</span>
+                <span className="text-xs text-slate-500">{new Date(h.createdAt).toLocaleString()}</span>
+                <span className="text-xs text-slate-500">Confidence: {h.confidence}</span>
+              </div>
+              <p className="text-slate-700">{h.reasoning}</p>
+              <div className="flex flex-wrap gap-4 text-xs text-slate-600">
+                <span>Stop-loss: <strong>{h.stopLoss.toFixed(2)}</strong></span>
+                <span>Target: <strong>{h.target.toFixed(2)}</strong></span>
+                <span>Holding: <strong>{h.holdingPeriodLabel}</strong></span>
+                {h.lastClose !== null && <span>Price then: <strong>{h.lastClose.toFixed(2)}</strong></span>}
+              </div>
+              {h.usedIndicators?.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {h.usedIndicators.map((ind) => (
+                    <span key={ind} className="text-[10px] uppercase tracking-wide bg-slate-100 text-slate-600 rounded px-1.5 py-0.5">
+                      {ind}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

@@ -18,6 +18,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { fetchDailyCandles } from "@/lib/stockData";
+import { saveTradeScenario } from "@/lib/db";
 import {
   summarizeIndicators,
   sma,
@@ -324,6 +325,39 @@ Keep your answer concise and structured with short headers.${
       (block: any) => block.type === "tool_use" && block.name === "trade_scenario"
     ) as any;
     const tradeScenario = toolUseBlock ? toolUseBlock.input : null;
+
+    // Save this scenario to the history database — "best-effort": if it
+    // fails (e.g. you haven't set up DATABASE_URL yet, or the database is
+    // briefly unreachable), we log it but don't fail the whole analysis
+    // request over it. Not having history saved is a much smaller problem
+    // than not being able to analyze a ticker at all.
+    if (tradeScenario) {
+      try {
+        await saveTradeScenario({
+          ticker: cleanTicker,
+          lastClose: summary.lastClose,
+          bias: tradeScenario.bias,
+          confidence: tradeScenario.confidence,
+          reasoning: tradeScenario.reasoning,
+          entryZone: tradeScenario.entryZone,
+          stopLoss: tradeScenario.stopLoss,
+          stopLossReasoning: tradeScenario.stopLossReasoning,
+          target: tradeScenario.target,
+          targetReasoning: tradeScenario.targetReasoning,
+          holdingPeriodDays: tradeScenario.holdingPeriodDays,
+          holdingPeriodLabel: tradeScenario.holdingPeriodLabel,
+          atr14: latestAtr,
+          // "what signal indicated what": the exact set of indicators
+          // that were checked (and therefore fed to the AI) for this
+          // particular scenario — saved alongside it so a past entry in
+          // your history says not just what was recommended, but which
+          // signals were in play when it was.
+          usedIndicators: selectedNames.split(", ").filter(Boolean),
+        });
+      } catch (dbErr) {
+        console.error("Failed to save trade scenario to history:", dbErr);
+      }
+    }
 
     // Bundle per-day series into one array so the frontend can plot a
     // single ResponsiveContainer per panel without juggling parallel arrays.
