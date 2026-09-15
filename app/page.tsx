@@ -684,7 +684,7 @@ function HistorySection({
       {error && (
         <div className="rounded-md bg-red-50 border border-red-200 text-red-700 px-4 py-3 text-sm mb-2">
           {error}
-          {error.includes("DATABASE_URL") && (
+          {error.includes("POSTGRES_URL") && (
             <p className="mt-1 text-xs">
               History needs a database connected — see the README for the one-time Vercel Postgres setup.
             </p>
