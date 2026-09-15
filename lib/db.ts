@@ -56,6 +56,22 @@ function getPool(): Pool {
     );
   }
 
+  // TEMPORARY DEBUG LOG — safe to leave in briefly, but not something to
+  // keep long-term once the bug is found. This prints the connection
+  // string's STRUCTURE (which host/port it thinks it should connect to,
+  // and the overall length) to Vercel's function logs, without ever
+  // printing the password itself. This lets us see what Vercel is
+  // actually handing the app at runtime, instead of guessing.
+  try {
+    const masked = connectionString.replace(/:\/\/([^:]+):([^@]+)@/, "://$1:***@");
+    console.log("[lib/db.ts] POSTGRES_URL length:", connectionString.length);
+    console.log("[lib/db.ts] POSTGRES_URL (password masked):", masked);
+    const parsed = new URL(connectionString);
+    console.log("[lib/db.ts] Parsed hostname:", parsed.hostname, "| port:", parsed.port);
+  } catch (parseErr) {
+    console.log("[lib/db.ts] Failed to parse POSTGRES_URL as a URL at all:", parseErr);
+  }
+
   const pool = new Pool({
     connectionString,
     // Vercel's Postgres (and most hosted Postgres providers) require an
