@@ -182,6 +182,10 @@ export default function Home() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyTickerFilter, setHistoryTickerFilter] = useState("");
+  // Whether the History section is collapsed. Starts collapsed so a long
+  // trade history doesn't push the rest of the page down every time you
+  // load it — you can still expand it with the toggle button.
+  const [historyCollapsed, setHistoryCollapsed] = useState(true);
 
   async function loadHistory(tickerFilter?: string) {
     setHistoryLoading(true);
@@ -314,6 +318,8 @@ export default function Home() {
           tickerFilter={historyTickerFilter}
           onTickerFilterChange={(v) => setHistoryTickerFilter(v)}
           onRefresh={() => loadHistory(historyTickerFilter || undefined)}
+          collapsed={historyCollapsed}
+          onToggleCollapsed={() => setHistoryCollapsed((prev) => !prev)}
         />
 
         {result && (
@@ -647,6 +653,8 @@ function HistorySection({
   tickerFilter,
   onTickerFilterChange,
   onRefresh,
+  collapsed,
+  onToggleCollapsed,
 }: {
   history: HistoryEntry[];
   loading: boolean;
@@ -654,6 +662,8 @@ function HistorySection({
   tickerFilter: string;
   onTickerFilterChange: (value: string) => void;
   onRefresh: () => void;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
 }) {
   const biasColor = (bias: HistoryEntry["bias"]) =>
     bias === "long" ? "text-green-700 bg-green-100" : bias === "short" ? "text-red-700 bg-red-100" : "text-slate-700 bg-slate-200";
@@ -661,7 +671,20 @@ function HistorySection({
   return (
     <section>
       <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
-        <h2 className="font-semibold">History</h2>
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          className="flex items-center gap-1.5 font-semibold"
+          aria-expanded={!collapsed}
+        >
+          {/* Simple text arrow instead of an icon library — keeps this
+              component dependency-free. Rotates via a class swap. */}
+          <span className={`inline-block transition-transform ${collapsed ? "" : "rotate-90"}`}>▶</span>
+          History
+          {history.length > 0 && (
+            <span className="text-xs font-normal text-slate-400">({history.length})</span>
+          )}
+        </button>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -681,7 +704,7 @@ function HistorySection({
         </form>
       </div>
 
-      {error && (
+      {!collapsed && error && (
         <div className="rounded-md bg-red-50 border border-red-200 text-red-700 px-4 py-3 text-sm mb-2">
           {error}
           {error.includes("POSTGRES_URL") && (
@@ -692,14 +715,14 @@ function HistorySection({
         </div>
       )}
 
-      {!error && history.length === 0 && !loading && (
+      {!collapsed && !error && history.length === 0 && !loading && (
         <p className="text-sm text-slate-500 bg-white rounded-md border border-slate-200 p-4">
           No saved scenarios yet — run an analysis with &quot;Include a trade scenario&quot; checked, and it&apos;ll show up here.
         </p>
       )}
 
-      {history.length > 0 && (
-        <div className="bg-white rounded-md border border-slate-200 divide-y divide-slate-100">
+      {!collapsed && history.length > 0 && (
+        <div className="bg-white rounded-md border border-slate-200 divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
           {history.map((h) => (
             <div key={h.id} className="p-3 text-sm space-y-1.5">
               <div className="flex flex-wrap items-center gap-2">
